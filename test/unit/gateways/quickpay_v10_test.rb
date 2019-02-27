@@ -41,6 +41,30 @@ class QuickpayV10Test < Test::Unit::TestCase
     end.respond_with(successful_payment_response, successful_authorization_response)
   end
 
+  def test_successful_purchase_with_3ds_passthrough
+    stub_comms do
+      response = @gateway.purchase(@amount, @credit_card, @options.merge(eci: '02', xid: "xid", cavv: "cavv"))
+      assert response
+      assert_success response
+      assert_equal "1145", response.authorization
+      assert response.test?
+    end.check_request do |endpoint, data, headers|
+      parsed = parse(data)
+      if parsed['order_id']
+        assert_match %r{/payments}, endpoint
+      elsif !parsed['auto_capture'].nil?
+        assert_match %r{/payments/\d+/authorize}, endpoint
+        assert_equal false, parsed['auto_capture']
+        assert parsed["extras"]
+        assert_equal "02", parsed["extras"]["3d_secure"]["eci"]
+        assert_equal "xid", parsed["extras"]["3d_secure"]["xid"]
+        assert_equal "cavv", parsed["extras"]["3d_secure"]["cavv"]
+      else
+        assert_match %r{/payments/\d+/capture}, endpoint
+      end
+    end.respond_with(successful_payment_response, successful_authorization_response)
+  end
+
   def test_successful_authorization
     stub_comms do
       assert response = @gateway.authorize(@amount, @credit_card, @options)
@@ -53,6 +77,26 @@ class QuickpayV10Test < Test::Unit::TestCase
         assert_match %r{/payments}, endpoint
         assert_match '1.1.1.1', @options[:customer_ip]
       else
+        assert_match %r{/payments/\d+/authorize}, endpoint
+      end
+    end.respond_with(successful_payment_response, successful_authorization_response)
+  end
+
+  def test_successful_authorization_with_3ds_passthrough
+    stub_comms do
+      assert response = @gateway.authorize(@amount, @credit_card, @options.merge(eci: '02', xid: "xid", cavv: "cavv"))
+      assert_success response
+      assert_equal "1145", response.authorization
+      assert response.test?
+    end.check_request do |endpoint, data, headers|
+      parsed = parse(data)
+      if parsed['order_id']
+        assert_match %r{/payments}, endpoint
+      else
+        assert parsed["extras"]
+        assert_equal "02", parsed["extras"]["3d_secure"]["eci"]
+        assert_equal "xid", parsed["extras"]["3d_secure"]["xid"]
+        assert_equal "cavv", parsed["extras"]["3d_secure"]["cavv"]
         assert_match %r{/payments/\d+/authorize}, endpoint
       end
     end.respond_with(successful_payment_response, successful_authorization_response)

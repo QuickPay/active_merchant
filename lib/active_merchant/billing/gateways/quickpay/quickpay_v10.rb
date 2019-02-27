@@ -24,6 +24,7 @@ module ActiveMerchant
           r.process {
             post = authorization_params(money, credit_card_or_reference, options)
             add_autocapture(post, false)
+            add_3ds_params(post, options)
             commit(synchronized_path("/payments/#{r.responses.last.params["id"]}/authorize"), post)
           }
           r.process {
@@ -42,6 +43,7 @@ module ActiveMerchant
           r.process { create_payment(money, options) }
           r.process {
             post = authorization_params(money, credit_card_or_reference, options)
+            add_3ds_params(post, options)
             commit(synchronized_path("/payments/#{r.responses.last.params["id"]}/authorize"), post)
           }
         end
@@ -204,6 +206,17 @@ module ActiveMerchant
         MD5_CHECK_FIELDS[API_VERSION][action].each do |key|
           key       = key.to_sym
           post[key] = options[key] if options[key]
+        end
+      end
+
+      def add_3ds_params(post, options={})
+        if options[:eci]
+          post[:extras] ||= {}
+          post[:extras][:"3d_secure"] = {
+            eci: options[:eci],
+            cavv: options[:cavv],
+            xid: options[:xid]
+          }
         end
       end
 
