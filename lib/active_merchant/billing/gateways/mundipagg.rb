@@ -128,8 +128,8 @@ module ActiveMerchant #:nodoc:
       def add_shipping_address(post, options)
         if address = options[:shipping_address]
           post[:address] = {}
-          post[:address][:street] = address[:address1].match(/\D+/)[0].strip if address[:address1]
-          post[:address][:number] = address[:address1].match(/\d+/)[0] if address[:address1]
+          post[:address][:street] = address[:address1].match(/\D+/)[0].strip if address[:address1]&.match(/\D+/)
+          post[:address][:number] = address[:address1].match(/\d+/)[0] if address[:address1]&.match(/\d+/)
           post[:address][:compliment] = address[:address2] if address[:address2]
           post[:address][:city] = address[:city] if address[:city]
           post[:address][:state] = address[:state] if address[:state]
@@ -155,7 +155,8 @@ module ActiveMerchant #:nodoc:
         post[:customer][:name] = payment.name if post[:customer]
         post[:customer_id] = parse_auth(payment)[0] if payment.is_a?(String)
         post[:payment] = {}
-        post[:payment][:gateway_affiliation_id] = @options[:gateway_id] if @options[:gateway_id]
+        affiliation = options[:gateway_affiliation_id] || @options[:gateway_id]
+        post[:payment][:gateway_affiliation_id] = affiliation if affiliation
         post[:payment][:metadata] = { mundipagg_payment_method_code: '1' } if test?
         if voucher?(payment)
           add_voucher(post, payment, options)

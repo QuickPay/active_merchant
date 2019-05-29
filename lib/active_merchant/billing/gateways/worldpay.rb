@@ -7,7 +7,7 @@ module ActiveMerchant #:nodoc:
       self.default_currency = 'GBP'
       self.money_format = :cents
       self.supported_countries = %w(HK GB AU AD AR BE BR CA CH CN CO CR CY CZ DE DK ES FI FR GI GR HU IE IN IT JP LI LU MC MT MY MX NL NO NZ PA PE PL PT SE SG SI SM TR UM VA)
-      self.supported_cardtypes = [:visa, :master, :american_express, :discover, :jcb, :maestro]
+      self.supported_cardtypes = [:visa, :master, :american_express, :discover, :jcb, :maestro, :elo]
       self.currencies_without_fractions = %w(HUF IDR ISK JPY KRW)
       self.currencies_with_three_decimal_places = %w(BHD KWD OMR RSD TND)
       self.homepage_url = 'http://www.worldpay.com/'
@@ -21,6 +21,8 @@ module ActiveMerchant #:nodoc:
         'jcb'              => 'JCB-SSL',
         'maestro'          => 'MAESTRO-SSL',
         'diners_club'      => 'DINERS-SSL',
+        'elo'              => 'ELO-SSL',
+        'unknown'          => 'CARD-SSL'
       }
 
       AVS_CODE_MAP = {
@@ -251,7 +253,7 @@ module ActiveMerchant #:nodoc:
           end
         else
           xml.tag! 'paymentDetails', credit_fund_transfer_attribute(options) do
-            xml.tag! CARD_CODES[card_brand(payment_method)] do
+            xml.tag! card_code_for(payment_method) do
               xml.tag! 'cardNumber', payment_method.number
               xml.tag! 'expiryDate' do
                 xml.tag! 'date', 'month' => format(payment_method.month, :two_digits), 'year' => format(payment_method.year, :four_digits)
@@ -262,13 +264,23 @@ module ActiveMerchant #:nodoc:
 
               add_address(xml, (options[:billing_address] || options[:address]))
             end
+            add_stored_credential_options(xml, options)
             if options[:ip] && options[:session_id]
               xml.tag! 'session', 'shopperIPAddress' => options[:ip], 'id' => options[:session_id]
             else
               xml.tag! 'session', 'shopperIPAddress' => options[:ip] if options[:ip]
               xml.tag! 'session', 'id' => options[:session_id] if options[:session_id]
             end
-            add_stored_credential_options(xml, options)
+
+            if three_d_secure = options[:three_d_secure]
+              xml.tag! 'info3DSecure' do
+                xml.tag! 'threeDSVersion', three_d_secure[:version]
+                xid_tag = three_d_secure[:version] =~ /^2/ ? 'dsTransactionId' : 'xid'
+                xml.tag! xid_tag, three_d_secure[:xid]
+                xml.tag! 'cavv', three_d_secure[:cavv]
+                xml.tag! 'eci', three_d_secure[:eci]
+              end
+            end
           end
         end
       end
@@ -490,6 +502,10 @@ module ActiveMerchant #:nodoc:
         return 0 if non_fractional_currency?(currency)
         return 3 if three_decimal_currency?(currency)
         return 2
+      end
+
+      def card_code_for(payment_method)
+        CARD_CODES[card_brand(payment_method)] || CARD_CODES['unknown']
       end
     end
   end

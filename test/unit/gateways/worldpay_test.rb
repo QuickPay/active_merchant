@@ -11,6 +11,15 @@ class WorldpayTest < Test::Unit::TestCase
 
     @amount = 100
     @credit_card = credit_card('4242424242424242')
+    @elo_credit_card = credit_card('4514 1600 0000 0008',
+      :month => 10,
+      :year => 2020,
+      :first_name => 'John',
+      :last_name => 'Smith',
+      :verification_value => '737',
+      :brand => 'elo'
+    )
+    @sodexo_voucher = credit_card('6060704495764400', brand: 'sodexo')
     @options = {:order_id => 1}
   end
 
@@ -83,6 +92,13 @@ class WorldpayTest < Test::Unit::TestCase
     assert_success response
   end
 
+  def test_successful_purchase_with_elo
+    response = stub_comms do
+      @gateway.purchase(@amount, @credit_card, @options.merge(currency: 'BRL'))
+    end.respond_with(successful_authorize_with_elo_response, successful_capture_with_elo_response)
+    assert_success response
+  end
+
   def test_purchase_passes_correct_currency
     response = stub_comms do
       @gateway.purchase(@amount, @credit_card, @options.merge(currency: 'CAD'))
@@ -122,6 +138,15 @@ class WorldpayTest < Test::Unit::TestCase
     assert_success response
     assert_equal 'SUCCESS', response.message
     assert_equal '924e810350efc21a989e0ac7727ce43b', response.params['cancel_received_order_code']
+  end
+
+  def test_successful_void_with_elo
+    response = stub_comms do
+      @gateway.void(@options[:order_id], @options)
+    end.respond_with(successful_void_inquiry_with_elo_response, successful_void_with_elo_response)
+    assert_success response
+    assert_equal 'SUCCESS', response.message
+    assert_equal '3a10f83fb9bb765488d0b3eb153879d7', response.params['cancel_received_order_code']
   end
 
   def test_void_fails_unless_status_is_authorized
@@ -492,6 +517,13 @@ class WorldpayTest < Test::Unit::TestCase
     assert_success response
   end
 
+  def test_successful_verify_with_elo
+    @gateway.expects(:ssl_post).times(2).returns(successful_authorize_with_elo_response, successful_void_with_elo_response)
+
+    response = @gateway.verify(@elo_credit_card, @options.merge(currency: 'BRL'))
+    assert_success response
+  end
+
   def test_successful_verify_with_failed_void
     @gateway.expects(:ssl_post).times(2).returns(successful_authorize_response, failed_void_response)
 
@@ -522,7 +554,66 @@ class WorldpayTest < Test::Unit::TestCase
     assert_equal scrubbed_transcript, @gateway.scrub(transcript)
   end
 
+  def test_3ds_version_1_request
+    stub_comms do
+      @gateway.authorize(@amount, @credit_card, @options.merge(three_d_secure_option('1.0.2')))
+    end.check_request do |endpoint, data, headers|
+      assert_match %r{<paymentService version="1.4" merchantCode="testlogin">}, data
+      assert_match %r{<eci>eci</eci>}, data
+      assert_match %r{<cavv>cavv</cavv>}, data
+      assert_match %r{<xid>xid</xid>}, data
+      assert_match %r{<threeDSVersion>1.0.2</threeDSVersion>}, data
+    end.respond_with(successful_authorize_response)
+  end
+
+  def test_3ds_version_2_request
+    stub_comms do
+      @gateway.authorize(@amount, @credit_card, @options.merge(three_d_secure_option('2.1.0')))
+    end.check_request do |endpoint, data, headers|
+      assert_match %r{<paymentService version="1.4" merchantCode="testlogin">}, data
+      assert_match %r{<eci>eci</eci>}, data
+      assert_match %r{<cavv>cavv</cavv>}, data
+      assert_match %r{<dsTransactionId>xid</dsTransactionId>}, data
+      assert_match %r{<threeDSVersion>2.1.0</threeDSVersion>}, data
+    end.respond_with(successful_authorize_response)
+  end
+
+  def test_failed_authorize_with_unknown_card
+    response = stub_comms do
+      @gateway.authorize(@amount, @sodexo_voucher, @options)
+    end.respond_with(failed_with_unknown_card_response)
+    assert_failure response
+    assert_equal '5', response.error_code
+  end
+
+  def test_failed_purchase_with_unknown_card
+    response = stub_comms do
+      @gateway.purchase(@amount, @sodexo_voucher, @options)
+    end.respond_with(failed_with_unknown_card_response)
+    assert_failure response
+    assert_equal '5', response.error_code
+  end
+
+  def test_failed_verify_with_unknown_card
+    @gateway.expects(:ssl_post).returns(failed_with_unknown_card_response)
+
+    response = @gateway.verify(@sodexo_voucher, @options)
+    assert_failure response
+    assert_equal '5', response.error_code
+  end
+
   private
+
+  def three_d_secure_option(version)
+    {
+      three_d_secure: {
+        eci: 'eci',
+        cavv: 'cavv',
+        xid: 'xid',
+        version: version
+      }
+    }
+  end
 
   def successful_authorize_response
     <<-RESPONSE
@@ -581,6 +672,86 @@ class WorldpayTest < Test::Unit::TestCase
           </ok>
         </reply>
       </paymentService>
+    RESPONSE
+  end
+
+  def successful_authorize_with_elo_response
+    <<-RESPONSE
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE paymentService PUBLIC "-//WorldPay//DTD WorldPay PaymentService v1//EN" "http://dtd.worldpay.com/paymentService_v1.dtd">
+      <paymentService version="1.4" merchantCode="SPREEDLY">
+        <reply>
+          <orderStatus orderCode="9fe31a79de5f6aa3ce1ed7bea7edbf42">
+            <payment>
+              <paymentMethod>ELO-SSL</paymentMethod>
+              <amount value="100" currencyCode="BRL" exponent="2" debitCreditIndicator="credit" />
+              <lastEvent>AUTHORISED</lastEvent>
+              <CVCResultCode description="C" />
+              <AVSResultCode description="H" />
+              <balance accountType="IN_PROCESS_AUTHORISED">
+                <amount value="100" currencyCode="BRL" exponent="2" debitCreditIndicator="credit" />
+              </balance>
+              <cardNumber>4514********0008</cardNumber>
+              <riskScore value="21" />
+            </payment>
+          </orderStatus>
+        </reply>
+      </paymentService>
+    RESPONSE
+  end
+
+  def successful_capture_with_elo_response
+    <<-RESPONSE
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE paymentService PUBLIC "-//WorldPay//DTD WorldPay PaymentService v1//EN" "http://dtd.worldpay.com/paymentService_v1.dtd">
+      <paymentService version="1.4" merchantCode="SPREEDLY">
+        <reply>
+          <ok>
+            <captureReceived orderCode="9fe31a79de5f6aa3ce1ed7bea7edbf42">
+              <amount value="100" currencyCode="BRL" exponent="2" debitCreditIndicator="credit" />
+            </captureReceived>
+          </ok>
+        </reply>
+      </paymentService>
+    RESPONSE
+  end
+
+  def successful_void_inquiry_with_elo_response
+    <<-RESPONSE
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE paymentService PUBLIC "-//WorldPay//DTD WorldPay PaymentService v1//EN" "http://dtd.worldpay.com/paymentService_v1.dtd">
+    <paymentService version="1.4" merchantCode="SPREEDLY">
+      <reply>
+        <orderStatus orderCode="eda0b101428892fdb32e2fc617a7f5e0">
+          <payment>
+            <paymentMethod>ELO-SSL</paymentMethod>
+            <amount value="100" currencyCode="BRL" exponent="2" debitCreditIndicator="credit" />
+            <lastEvent>AUTHORISED</lastEvent>
+            <CVCResultCode description="C" />
+            <AVSResultCode description="H" />
+            <balance accountType="IN_PROCESS_AUTHORISED">
+              <amount value="100" currencyCode="BRL" exponent="2" debitCreditIndicator="credit" />
+            </balance>
+            <cardNumber>4514********0008</cardNumber>
+            <riskScore value="21" />
+          </payment>
+        </orderStatus>
+      </reply>
+    </paymentService>
+    RESPONSE
+  end
+
+  def successful_void_with_elo_response
+    <<-RESPONSE
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE paymentService PUBLIC "-//WorldPay//DTD WorldPay PaymentService v1//EN" "http://dtd.worldpay.com/paymentService_v1.dtd">
+    <paymentService version="1.4" merchantCode="SPREEDLY">
+      <reply>
+        <ok>
+          <cancelReceived orderCode="3a10f83fb9bb765488d0b3eb153879d7" />
+        </ok>
+      </reply>
+    </paymentService>
     RESPONSE
   end
 
@@ -924,5 +1095,19 @@ class WorldpayTest < Test::Unit::TestCase
       </submit>
     </paymentService>
     TRANSCRIPT
+  end
+
+  def failed_with_unknown_card_response
+    <<-RESPONSE
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE paymentService PUBLIC "-//WorldPay//DTD WorldPay PaymentService v1//EN" "http://dtd.worldpay.com/paymentService_v1.dtd">
+    <paymentService version="1.4" merchantCode="SPREEDLY">
+      <reply>
+        <error code="5">
+          <![CDATA[XML failed validation: Invalid payment details : Card number not recognised: 606070******4400]]>
+        </error>
+      </reply>
+    </paymentService>
+    RESPONSE
   end
 end

@@ -125,11 +125,17 @@ class CreditCardMethodsTest < Test::Unit::TestCase
   end
 
   def test_should_detect_sodexo_card
-    assert_equal 'sodexo', CreditCard.brand?('60606944957644')
+    assert_equal 'sodexo', CreditCard.brand?('6060694495764400')
   end
 
   def test_should_detect_vr_card
-    assert_equal 'vr', CreditCard.brand?('63703644957644')
+    assert_equal 'vr', CreditCard.brand?('6370364495764400')
+  end
+
+  def test_should_detect_elo_card
+    assert_equal 'elo', CreditCard.brand?('5090510000000000')
+    assert_equal 'elo', CreditCard.brand?('5067530000000000')
+    assert_equal 'elo', CreditCard.brand?('6509550000000000')
   end
 
   def test_should_detect_when_an_argument_brand_does_not_match_calculated_brand
